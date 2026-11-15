@@ -4,6 +4,7 @@ The local stack optimizes for "clone and run". Before real neighbours use it, I 
 roughly in priority order.
 
 ## Hosting and secrets
+
 - **Managed Convex** (Convex Cloud, or self-hosted on Postgres with backups), deployed from CI with a deploy key.
   Separate dev, staging and prod deployments, each with its own Clerk instance and signing secrets.
 - **Next.js on Vercel or AWS** (Amplify, or a container on ECS Fargate behind CloudFront).
@@ -19,6 +20,7 @@ roughly in priority order.
   and an unsubscribe link for reminders.
 
 ## Reliability
+
 - Close the last duplicate window. Reminders are claimed with a lease, so overlapping runs never double-send. But if
   n8n crashes after the email went out and before the write-back, the lease expires and a later run sends again.
   Pass `reminderKey` (and the notification `jti`) as an idempotency key where the email provider supports one (for
@@ -32,6 +34,7 @@ roughly in priority order.
 - Health checks and uptime monitoring on the Convex HTTP endpoints and the n8n webhook.
 
 ## Security
+
 - **Rate limits** on mutations (for example `@convex-dev/rate-limiter`) and at the edge for the n8n webhook, plus
   bot protection on sign-up (Clerk supports it).
 - A strict nonce-based **CSP** (`strict: true` in Clerk's middleware) once every script is accounted for.
@@ -42,6 +45,7 @@ roughly in priority order.
   steady stream of security fixes.
 
 ## Privacy and compliance
+
 - **Retention:** delete or anonymize loans, reminders and events after a fixed period (say 12 months), and keep n8n
   execution data for days, not weeks (or save only failed executions).
 - **Account deletion:** a Clerk `user.deleted` webhook that removes the user row and anonymizes their loans.
@@ -51,6 +55,7 @@ roughly in priority order.
   resolve it at send time, or redact fields in the execution data.
 
 ## Observability
+
 - Structured logs from Convex (log streams to Datadog or Axiom), n8n execution metrics (`N8N_METRICS=true` for
   Prometheus), and Sentry for the Next.js front end.
 - A correlation ID (the event `jti`) carried from the Convex mutation through n8n and back in the receipt, so one

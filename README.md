@@ -27,16 +27,16 @@ to Clerk.
 
 **Signed in:**
 
-| Page | What you can do |
-| --- | --- |
-| **Browse** (`/tools`) | Every listed tool with its availability (available, booked from a date, on loan until a date, or overdue), filterable by category. Request to borrow for a date range, with an optional note. |
-| **My listings** (`/listings`) | List a tool (name, category, condition, short description), edit it, or delete it. |
-| **My requests** (`/requests`) | Your borrow requests and loans, their status and automation activity. Cancel a request, or an approved loan that hasn't started yet. |
-| **Incoming** (`/incoming`) | Requests for your tools: approve or decline, then mark loans returned. |
-| **Admin** (`/admin`, admins only) | Automation health, every loan, Trusted Lender badges. Admins can also remove any listing from Browse. |
+| Page                              | What you can do                                                                                                                                                                               |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Browse** (`/tools`)             | Every listed tool with its availability (available, booked from a date, on loan until a date, or overdue), filterable by category. Request to borrow for a date range, with an optional note. |
+| **My listings** (`/listings`)     | List a tool (name, category, condition, short description), edit it, or delete it.                                                                                                            |
+| **My requests** (`/requests`)     | Your borrow requests and loans, their status and automation activity. Cancel a request, or an approved loan that hasn't started yet.                                                          |
+| **Incoming** (`/incoming`)        | Requests for your tools: approve or decline, then mark loans returned.                                                                                                                        |
+| **Admin** (`/admin`, admins only) | Automation health, every loan, Trusted Lender badges. Admins can also remove any listing from Browse.                                                                                         |
 
-Every loan shows its recent automation activity, for example *"Borrower emailed about the approval · 5 minutes
-ago"* or *"Overdue reminder sent to the borrower · 2 days ago"*.
+Every loan shows its recent automation activity, for example _"Borrower emailed about the approval · 5 minutes
+ago"_ or _"Overdue reminder sent to the borrower · 2 days ago"_.
 
 **Roles.** `user` can create, edit and delete only their own listings, and act only on requests involving their
 own tools or their own borrowing. `admin` can also remove any listing, view all loans and mark a lender as a
@@ -173,11 +173,11 @@ Then open <http://localhost:3000>, sign in, and make yourself an admin:
 npm run make-admin -- you@example.com
 ```
 
-| Service | URL |
-| --- | --- |
-| LendLoop | <http://localhost:3000> |
-| Mailpit inbox (every email n8n sends) | <http://localhost:8025> |
-| n8n editor (create the local owner login on first visit) | <http://localhost:5678> |
+| Service                                                                         | URL                     |
+| ------------------------------------------------------------------------------- | ----------------------- |
+| LendLoop                                                                        | <http://localhost:3000> |
+| Mailpit inbox (every email n8n sends)                                           | <http://localhost:8025> |
+| n8n editor (create the local owner login on first visit)                        | <http://localhost:5678> |
 | Convex dashboard (log in with `CONVEX_SELF_HOSTED_ADMIN_KEY` from `.env.local`) | <http://localhost:6791> |
 
 If you change Convex functions, run `npm run dev:convex` in a second terminal to push them on save.
@@ -185,12 +185,12 @@ If you change Convex functions, run `npm run dev:convex` in a second terminal to
 ### Try the whole loop
 
 1. **Browse** shows the demo tools. Request Asha's cordless drill: an email to Asha lands in Mailpit within a
-   second or two, and the request shows *"Lender emailed about the request"*.
+   second or two, and the request shows _"Lender emailed about the request"_.
 2. List a tool under **My listings**. To see the lender side, sign in as a second user in a private window, request
    it, then approve it under **Incoming** in the first window. The borrower gets an email, and both sides can now
    see each other's email to arrange the hand-over. **Mark returned** finishes the loan.
 3. On **Admin**, click **Run overdue check now**. n8n fetches the overdue demo loan (Ravi's hedge trimmer), emails
-   Ravi and writes the reminder back: the loan shows *"Overdue reminder sent to the borrower · just now"*. Click it
+   Ravi and writes the reminder back: the loan shows _"Overdue reminder sent to the borrower · just now"_. Click it
    again and nothing new is sent, because the reminder for today is already recorded.
 4. To see failure handling, stop Mailpit (`docker compose stop mailpit`) and request another tool. The n8n run fails
    after its retries, the error workflow records it, and the admin page lists it under **Failed notifications** and
@@ -209,19 +209,19 @@ each workflow to your deployment's `https://<name>.convex.site`.
 Secrets live in exactly two places: gitignored env files on your machine, and the services' own secret stores
 (Convex environment variables, encrypted n8n credentials). None are in the code or the exported workflow JSON.
 
-| Variable | Where it lives | Used by | Notes |
-| --- | --- | --- | --- |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `.env.local` | browser | Public by design. |
-| `CLERK_SECRET_KEY` | `.env.local` | Next.js server (Clerk middleware) | Never sent to the browser. |
-| `CLERK_FRONTEND_API_URL` | `.env.local` → Convex env | Convex `auth.config.ts` | Issuer Convex trusts for session tokens. |
-| `NEXT_PUBLIC_CLERK_KEYLESS_DISABLED` | `.env.local` | Clerk | Stops Clerk from auto-creating a throwaway app when keys are missing. |
-| `NEXT_PUBLIC_CONVEX_URL` | `.env.local` | browser | `http://127.0.0.1:3210` for the Docker backend. |
-| `CONVEX_SELF_HOSTED_URL`, `CONVEX_SELF_HOSTED_ADMIN_KEY` | `.env.local` | Convex CLI | Admin key is written by `npm run setup`. |
-| `CONVEX_TO_N8N_SIGNING_SECRET` | `.env.automation` → Convex env + n8n credential | Convex signs, n8n verifies | 32+ random bytes. |
-| `N8N_TO_CONVEX_SIGNING_SECRET` | `.env.automation` → Convex env + n8n credential | n8n signs, Convex verifies | A different secret per direction. |
-| `N8N_LOAN_EVENTS_WEBHOOK_URL`, `N8N_OVERDUE_SWEEP_WEBHOOK_URL` | Convex env | Convex actions | Set by setup to the n8n service on the Docker network. |
-| `LENDLOOP_APP_URL` | Convex env | links in emails | `http://localhost:3000` locally. |
-| `LENDLOOP_TIMEZONE` | shell / `.env` (optional) | n8n schedule | Defaults to `Asia/Kolkata`. |
+| Variable                                                       | Where it lives                                  | Used by                           | Notes                                                                 |
+| -------------------------------------------------------------- | ----------------------------------------------- | --------------------------------- | --------------------------------------------------------------------- |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`                            | `.env.local`                                    | browser                           | Public by design.                                                     |
+| `CLERK_SECRET_KEY`                                             | `.env.local`                                    | Next.js server (Clerk middleware) | Never sent to the browser.                                            |
+| `CLERK_FRONTEND_API_URL`                                       | `.env.local` → Convex env                       | Convex `auth.config.ts`           | Issuer Convex trusts for session tokens.                              |
+| `NEXT_PUBLIC_CLERK_KEYLESS_DISABLED`                           | `.env.local`                                    | Clerk                             | Stops Clerk from auto-creating a throwaway app when keys are missing. |
+| `NEXT_PUBLIC_CONVEX_URL`                                       | `.env.local`                                    | browser                           | `http://127.0.0.1:3210` for the Docker backend.                       |
+| `CONVEX_SELF_HOSTED_URL`, `CONVEX_SELF_HOSTED_ADMIN_KEY`       | `.env.local`                                    | Convex CLI                        | Admin key is written by `npm run setup`.                              |
+| `CONVEX_TO_N8N_SIGNING_SECRET`                                 | `.env.automation` → Convex env + n8n credential | Convex signs, n8n verifies        | 32+ random bytes.                                                     |
+| `N8N_TO_CONVEX_SIGNING_SECRET`                                 | `.env.automation` → Convex env + n8n credential | n8n signs, Convex verifies        | A different secret per direction.                                     |
+| `N8N_LOAN_EVENTS_WEBHOOK_URL`, `N8N_OVERDUE_SWEEP_WEBHOOK_URL` | Convex env                                      | Convex actions                    | Set by setup to the n8n service on the Docker network.                |
+| `LENDLOOP_APP_URL`                                             | Convex env                                      | links in emails                   | `http://localhost:3000` locally.                                      |
+| `LENDLOOP_TIMEZONE`                                            | shell / `.env` (optional)                       | n8n schedule                      | Defaults to `Asia/Kolkata`.                                           |
 
 `.env.automation` is passed **only** to the one-shot `n8n-import` container (via `env_file`), which turns it into
 encrypted n8n credentials and exits. The long-running n8n container never has the secrets in its environment,
@@ -233,17 +233,17 @@ The exported workflows are in [`n8n/workflows/`](n8n/workflows) and are imported
 `docker compose up`. They contain no secrets, only references to three credentials that
 [`n8n/bootstrap/credentials.mjs`](n8n/bootstrap/credentials.mjs) creates at import time:
 
-| Credential | Type | Used for |
-| --- | --- | --- |
-| LendLoop: Convex -> n8n signing key | JWT (HS256 passphrase) | Webhook JWT auth on both n8n webhooks |
+| Credential                          | Type                   | Used for                                 |
+| ----------------------------------- | ---------------------- | ---------------------------------------- |
+| LendLoop: Convex -> n8n signing key | JWT (HS256 passphrase) | Webhook JWT auth on both n8n webhooks    |
 | LendLoop: n8n -> Convex signing key | JWT (HS256 passphrase) | JWT nodes that sign every call to Convex |
-| LendLoop: SMTP (Mailpit) | SMTP | Send Email nodes |
+| LendLoop: SMTP (Mailpit)            | SMTP                   | Send Email nodes                         |
 
 ### 1. LendLoop: Loan event notifications ([`loan-event-notifications.json`](n8n/workflows/loan-event-notifications.json))
 
 `POST /webhook/lendloop/loan-events` → **Settings** → **Check claims and build email** → **Valid event?** →
 **Already emailed?** → **Accept: 202** → **Email the neighbour** → **Record result** → **Sign receipt** →
-**Write receipt to Convex** → **Email failed?** → *Fail the run* / *Done*
+**Write receipt to Convex** → **Email failed?** → _Fail the run_ / _Done_
 
 - The Webhook node's **JWT auth** rejects a missing token (`401`) and a forged, expired or wrong-algorithm token
   (`403`) before any execution exists. A Code node then checks what the Webhook doesn't: `iss`, `aud`, `kind`, the
@@ -261,7 +261,7 @@ Two triggers: **Every day at 09:00** (cron `0 0 9 * * *` in `GENERIC_TIMEZONE`, 
 **Run now (admin button)**, a second JWT-authenticated webhook (`POST /webhook/lendloop/overdue-sweep`) that the
 admin page calls through Convex. Then: **Settings** → **Sign claim request** → **Fetch and claim overdue loans** →
 **One item per loan** → **One loan at a time** (email the borrower → sign → write the status back) →
-**Summarize run** → **Any reminder failed?** → *Fail the run* / *Done*.
+**Summarize run** → **Any reminder failed?** → _Fail the run_ / _Done_.
 
 - **Fetch and claim.** `POST /n8n/overdue-loans` returns approved loans past their end date that have no reminder
   for today. In the same transaction Convex marks each returned loan `sending` for this run, with a 30-minute lease
@@ -272,7 +272,7 @@ admin page calls through Convex. Then: **Settings** → **Sign claim request** �
 - **Idempotent write-back.** `POST /n8n/reminders` upserts on `reminderKey` = `<loanId>:<YYYY-MM-DD>`. `sent` is
   final, so a retried or repeated write-back can't add a second record or turn it back to `failed`. A `failed`
   reminder is picked up again by the next run.
-- If any reminder failed, the run ends with *"N of M overdue reminders could not be sent"*, which triggers the
+- If any reminder failed, the run ends with _"N of M overdue reminders could not be sent"_, which triggers the
   error workflow. If n8n stops running altogether, the admin page warns once the last fetch is more than 26 hours
   old.
 
@@ -280,7 +280,7 @@ admin page calls through Convex. Then: **Settings** → **Sign claim request** �
 
 The **error workflow** (Settings → Error workflow) of the other two. An Error Trigger feeds **Email the admin**
 (workflow, node, message and a link to the execution) and **Report to LendLoop**, a signed, idempotent `POST
-/n8n/failures` that lists the failure on the admin page under *Failed n8n runs*. Both steps retry and continue on
+/n8n/failures` that lists the failure on the admin page under _Failed n8n runs_. Both steps retry and continue on
 failure, so one broken channel (say, SMTP) doesn't hide the other. Together with the receipts and the 26-hour
 heartbeat, a failed run is visible in three places: n8n's execution list, the admin's inbox and the LendLoop admin
 page.
