@@ -328,8 +328,8 @@ value lives in the workflow instead.
   control-character cleanup in `convex/lib/text.ts`; the UI limits are hints. React escapes all output; emails are
   plain text.
 - **Least exposure on the network.** Every Docker port is bound to `127.0.0.1`; containers talk over a private
-  network. n8n runs with env access blocked, diagnostics off, settings-file permissions enforced and only the
-  `crypto` built-in allowed in Code nodes.
+  network. n8n runs with env access blocked, diagnostics off, settings-file permissions enforced, community packages
+  disabled and no Node built-ins available to Code nodes.
 - **Headers.** Clerk's middleware sets a Content-Security-Policy (with Convex added to `connect-src` and
   `frame-ancestors 'none'`); `next.config.ts` adds `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`
   and a restrictive `Permissions-Policy`, and drops `X-Powered-By`.
@@ -345,8 +345,9 @@ value lives in the workflow instead.
 - **Who sees an email:** only the two people on an approved loan, so they can arrange the hand-over. Lenders don't
   see a borrower's email before approving; admins never see emails (they don't need them to moderate).
 - **What n8n gets:** for a loan event, the recipient's display name and email, the other party's display name, the
-  tool name, the dates and a link. No user IDs, no loan IDs (the event ID is the only reference). For a reminder,
-  the same plus the reminder key. n8n has no database access: it can only call four narrow, scoped endpoints.
+  tool name, the dates and a link. No user or loan IDs: the event ID is the only reference. For a reminder, the
+  borrower's display name and email, the lender's display name, the tool name, the due date, and the loan ID and
+  reminder key it writes back with. n8n has no database access: it can only call four narrow, scoped endpoints.
 - **Retention:** n8n prunes execution data (which contains those names and emails) after 7 days. Convex and n8n
   telemetry beacons are disabled. Removed listings are soft-deleted so loan history stays consistent.
 - **Error details** (for example SMTP errors) are shown to admins only; neighbours just see that a notification
