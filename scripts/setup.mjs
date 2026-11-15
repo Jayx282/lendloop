@@ -102,16 +102,18 @@ step("Starting Docker services");
 const dc = compose();
 dc.run(["up", "-d", "--wait"]);
 
-// 4. Convex admin key for the CLI (stays in .env.local).
+// 4. Convex admin key for the CLI (stays in .env.local). It is derived from the
+// backend's instance secret, so regenerate it every time: after `docker compose
+// down -v` the instance gets a new secret and an old key stops working.
 step("Convex admin key");
-if (!local.CONVEX_SELF_HOSTED_ADMIN_KEY) {
-  const key = dc.output(["exec", "-T", "convex-backend", "./generate_admin_key.sh"]).split(/\r?\n/).pop();
-  if (!key) fail("Could not generate a Convex admin key.");
+const key = dc.output(["exec", "-T", "convex-backend", "./generate_admin_key.sh"]).split(/\r?\n/).pop();
+if (!key) fail("Could not generate a Convex admin key.");
+if (key !== local.CONVEX_SELF_HOSTED_ADMIN_KEY) {
   setEnvValue(".env.local", "CONVEX_SELF_HOSTED_ADMIN_KEY", key);
   local = readEnv(".env.local");
   console.log("  written to .env.local");
 } else {
-  console.log("  already in .env.local");
+  console.log("  up to date in .env.local");
 }
 
 // 5. Convex deployment env vars (server-side only, never sent to the browser).
