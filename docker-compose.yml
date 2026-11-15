@@ -1,0 +1,132 @@
+# LendLoop local stack: self-hosted Convex, n8n and a local SMTP inbox.
+#
+#   npm run setup          # first time: secrets, containers, Convex env, push functions
+#   docker compose up -d   # afterwards
+#
+# Every published port is bound to 127.0.0.1, so nothing is reachable from your network.
+# Containers talk to each other by service name on the private `lendloop` network:
+#   Convex  -> n8n     http://n8n:5678/webhook/...        (signed loan events)
+#   n8n     -> Convex  http://convex-backend:3211/n8n/... (signed reads and write-backs)
+#   n8n     -> Mailpit smtp://mailpit:1025                (notification and reminder emails)
+
+name: lendloop
+
+x-n8n-environment: &n8n-environment
+  # Schedules (the 09:00 overdue sweep) run in this time zone.
+  GENERIC_TIMEZONE: ${LENDLOOP_TIMEZONE:-Asia/Kolkata}
+  TZ: ${LENDLOOP_TIMEZONE:-Asia/Kolkata}
+  N8N_HOST: localhost
+  N8N_PORT: "5678"
+  N8N_PROTOCOL: http
+  N8N_EDITOR_BASE_URL: http://localhost:5678
+  N8N_WEBHOOK_URL: http://localhost:5678/
+  # Hardening and privacy: keep the defaults strict and send nothing home.
+  N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+  N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+  N8N_DIAGNOSTICS_ENABLED: "false"
+  N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+  N8N_PERSONALIZATION_ENABLED: "false"
+  N8N_HIRING_BANNER_ENABLED: "false"
+  # No community nodes: only n8n's built-in nodes can run.
+  N8N_COMMUNITY_PACKAGES_ENABLED: "false"
+  N8N_UNVERIFIED_PACKAGES_ENABLED: "false"
+  # Code nodes run in n8n's task runner. Internal mode keeps the local stack to one
+  # container; production should use external runners (the n8nio/runners image).
+  N8N_RUNNERS_MODE: internal
+  N8N_RUNNERS_TASK_TIMEOUT: "60"
+  # Execution history holds personal data (names, emails), so it is pruned after 7 days.
+  EXECUTIONS_DATA_PRUNE: "true"
+  EXECUTIONS_DATA_MAX_AGE: "168"
+  EXECUTIONS_DATA_SAVE_ON_ERROR: all
+  EXECUTIONS_DATA_SAVE_ON_SUCCESS: all
+  EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: "true"
+
+services:
+  convex-backend:
+    image: ghcr.io/convex/convex-backend:d1fcbeaf939502a23a0f4b7e9095a12e84866294
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    ports:
+      - "127.0.0.1:3210:3210" # Convex API (browser, CLI)
+      - "127.0.0.1:3211:3211" # HTTP actions (n8n endpoints)
+    volumes:
+      - convex-data:/convex/data
+    environment:
+      CONVEX_CLOUD_ORIGIN: http://127.0.0.1:3210
+      CONVEX_SITE_ORIGIN: http://127.0.0.1:3211
+      DISABLE_BEACON: "true" # no usage beacon to Convex
+      DOCUMENT_RETENTION_DELAY: "172800"
+    healthcheck:
+      test: curl -f http://localhost:3210/version
+      interval: 5s
+      start_period: 10s
+    networks: [lendloop]
+
+  convex-dashboard:
+    image: ghcr.io/convex/convex-dashboard:d1fcbeaf939502a23a0f4b7e9095a12e84866294
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    ports:
+      - "127.0.0.1:6791:6791"
+    environment:
+      NEXT_PUBLIC_DEPLOYMENT_URL: http://127.0.0.1:3210
+    depends_on:
+      convex-backend:
+        condition: service_healthy
+    networks: [lendloop]
+
+  # One-shot job: turns the signing secrets into encrypted n8n credentials,
+  # imports the workflows from ./n8n/workflows and publishes them, then exits.
+  # It is the only container that ever sees the secrets as plain environment variables.
+  n8n-import:
+    image: n8nio/n8n:2.47.7
+    entrypoint: ["/bin/sh", "/bootstrap/import.sh"]
+    env_file:
+      - path: .env.automation
+        required: true
+    environment:
+      <<: *n8n-environment
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+      - ./n8n/bootstrap:/bootstrap:ro
+    tmpfs:
+      - /tmp:mode=0700,uid=1000,gid=1000
+    networks: [lendloop]
+
+  n8n:
+    image: n8nio/n8n:2.47.7
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      <<: *n8n-environment
+    volumes:
+      - n8n-data:/home/node/.n8n
+    depends_on:
+      n8n-import:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
+    healthcheck:
+      test: wget -q -O /dev/null http://localhost:5678/healthz
+      interval: 5s
+      start_period: 20s
+    restart: unless-stopped
+    networks: [lendloop]
+
+  # Local SMTP server with a web inbox at http://localhost:8025.
+  # Every email n8n sends lands here; nothing leaves your machine.
+  mailpit:
+    image: axllent/mailpit:v1.33.1
+    ports:
+      - "127.0.0.1:8025:8025"
+    environment:
+      MP_MAX_MESSAGES: "500"
+    networks: [lendloop]
+
+volumes:
+  convex-data:
+  n8n-data:
+
+networks:
+  lendloop:

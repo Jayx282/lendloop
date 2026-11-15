@@ -1,0 +1,515 @@
+{
+  "id": "LLloanEventsWflw",
+  "name": "LendLoop: Loan event notifications",
+  "nodes": [
+    {
+      "id": "c882ca0e-c424-458f-a667-add7d3c26493",
+      "name": "About this workflow",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        -380
+      ],
+      "parameters": {
+        "content": "## Loan event notifications\nConvex calls this webhook when a borrow request is created or changes status (requested, approved, declined, cancelled, returned).\n\n- **Signed:** `Authorization: Bearer <HS256 JWT>`, verified by the Webhook node's JWT auth with the *Convex -> n8n* credential. Missing token: 401; bad, expired or forged: 403. No execution is created for either.\n- **Minimal payload:** recipient name and email, the other party's name, tool, dates, link. No IDs except the event ID (`jti`).\n- **Idempotent:** a redelivered event ID that was already emailed gets a 200 `duplicate` and no second email.\n- **Reliable:** 202 tells Convex to stop retrying. Email has 3 tries; the result is written back to Convex. A failure stops the run, which triggers **LendLoop: Error handler**.",
+        "width": 620,
+        "height": 300,
+        "color": 7
+      }
+    },
+    {
+      "id": "57c498e5-75e1-470e-a2a1-d8cb76a2f27d",
+      "name": "Loan event (signed by Convex)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -240,
+        0
+      ],
+      "webhookId": "3c9595d4-0407-447f-a6f5-facb950b2b99",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop/loan-events",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "jwtAuth": {
+          "id": "LLjwtConvexToN8n",
+          "name": "LendLoop: Convex -> n8n signing key"
+        }
+      }
+    },
+    {
+      "id": "6a946988-64c7-405d-a671-2849fccef135",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -20,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dc7d6253-2e93-4faa-a21f-f6ab17eb9295",
+              "name": "convexSiteUrl",
+              "value": "http://convex-backend:3211",
+              "type": "string"
+            },
+            {
+              "id": "d1339721-3eb2-4830-adc8-f13b607b82c6",
+              "name": "fromEmail",
+              "value": "LendLoop <no-reply@lendloop.local>",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "eb52e1cd-9881-4df6-a56f-f97744788055",
+      "name": "Check claims and build email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// The Webhook node has already verified the HS256 signature and expiry with the\n// \"LendLoop: Convex -> n8n signing key\" credential. It doesn't check the issuer,\n// the audience or the payload, so that happens here. Only verified claims are used.\nconst claims = $json.jwtPayload ?? {};\nconst event = claims.event ?? {};\n\nconst isDay = (d) => typeof d === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(d);\nconst isEmail = (e) => typeof e === 'string' && e.length <= 254 && /^[^\\s@<>]+@[^\\s@<>]+\\.[^\\s@<>]+$/.test(e);\nconst day = (d) =>\n  new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });\n\nconst problems = [];\nif (claims.iss !== 'lendloop-convex') problems.push('issuer');\nif (claims.aud !== 'lendloop-n8n') problems.push('audience');\nif (claims.kind !== 'loan_event') problems.push('kind');\nif (typeof claims.jti !== 'string' || claims.jti.length === 0) problems.push('jti');\nif (!isEmail(event.recipient?.email)) problems.push('recipient');\nif (!isDay(event.loan?.startDate) || !isDay(event.loan?.endDate)) problems.push('dates');\n\nconst other = event.counterpart?.name ?? 'A neighbour';\nconst tool = event.tool?.name ?? 'a tool';\nconst dates = problems.includes('dates') ? '' : day(event.loan.startDate) + ' to ' + day(event.loan.endDate);\nconst reason = event.loan?.reason ? '\\n\\nReason: ' + event.loan.reason : '';\nconst templates = {\n  'loan.requested': {\n    subject: other + ' would like to borrow your ' + tool,\n    body: other + ' would like to borrow your ' + tool + ' from ' + dates + '.\\n\\nApprove or decline the request:\\n' + event.link,\n  },\n  'loan.approved': {\n    subject: 'Approved: ' + tool + ' from ' + other,\n    body: other + ' approved your request to borrow their ' + tool + ' from ' + dates + \".\\n\\nYou can now see each other's email in LendLoop to arrange the hand-over:\\n\" + event.link,\n  },\n  'loan.declined': {\n    subject: 'Your request for the ' + tool + ' was declined',\n    body: other + \" can't lend you their \" + tool + ' from ' + dates + '.' + reason + '\\n\\nThere may be another one on the board:\\n' + event.link,\n  },\n  'loan.cancelled': {\n    subject: other + ' cancelled their request for your ' + tool,\n    body: other + ' no longer needs your ' + tool + ' from ' + dates + '. There is nothing else to do.\\n\\n' + event.link,\n  },\n  'loan.returned': {\n    subject: 'Thanks for returning the ' + tool,\n    body: other + ' marked their ' + tool + ' as returned. Thanks for borrowing kindly!\\n\\n' + event.link,\n  },\n};\nconst template = templates[event.type];\nif (!template) problems.push('type');\nif (problems.length > 0) return [{ json: { valid: false, problems } }];\n\n// Convex retries until it gets a 2xx, so the same event (same jti) can arrive twice.\nconst alreadySent = Boolean(($getWorkflowStaticData('global').sentEventIds ?? {})[claims.jti]);\n\n// Pass on only what the email needs.\nreturn [{\n  json: {\n    valid: true,\n    duplicate: alreadySent,\n    eventId: claims.jti,\n    type: event.type,\n    to: event.recipient.email,\n    subject: template.subject,\n    text: 'Hi ' + (event.recipient.name ?? 'neighbour') + ',\\n\\n' + template.body + '\\n\\n– LendLoop',\n  },\n}];"
+      }
+    },
+    {
+      "id": "d460ed65-2c79-4ac9-a942-59b00b582624",
+      "name": "Valid event?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        420,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "b5f4df44-3553-4eda-a228-ea1dc3a5782b",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "29f00a9e-bfe9-44ce-acfd-c20fce248c05",
+      "name": "Reject: 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        640,
+        180
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"error\":\"invalid event\"}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "5f253de5-189f-41c8-a1fb-6420bbe20e47",
+      "name": "Already emailed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        640,
+        -20
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "1536245b-3432-4325-ae12-41306828248d",
+              "leftValue": "={{ $json.duplicate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "68ebff7b-52d6-4c73-a579-6d64d85d70e2",
+      "name": "Reply: duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        860,
+        -200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\":\"duplicate\"}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "cda6b4c0-33b8-4ee1-a4c7-883ed2f5e6d9",
+      "name": "Accept: 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        860,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\":\"accepted\"}",
+        "options": {
+          "responseCode": 202
+        }
+      }
+    },
+    {
+      "id": "cf2f6155-79ce-44af-a03d-28134839303c",
+      "name": "Email the neighbour",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1080,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "fromEmail": "={{ $('Settings').first().json.fromEmail }}",
+        "toEmail": "={{ $('Check claims and build email').first().json.to }}",
+        "subject": "={{ $('Check claims and build email').first().json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $('Check claims and build email').first().json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "LLsmtpMailpit001",
+          "name": "LendLoop: SMTP (Mailpit)"
+        }
+      }
+    },
+    {
+      "id": "b58f2458-cf82-411b-a99b-a5ce4f7d306f",
+      "name": "Record result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const event = $('Check claims and build email').first().json;\nconst raw = $json.error;\nconst error = raw === undefined ? undefined : typeof raw === 'string' ? raw : (raw.message ?? JSON.stringify(raw));\n\nif (!error) {\n  // Remember sent event IDs for a week so a redelivery isn't emailed twice.\n  const store = $getWorkflowStaticData('global');\n  const sent = store.sentEventIds ?? {};\n  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;\n  for (const [id, at] of Object.entries(sent)) if (at < weekAgo) delete sent[id];\n  sent[event.eventId] = Date.now();\n  store.sentEventIds = sent;\n}\nreturn [{ json: { eventId: event.eventId, type: event.type, status: error ? 'failed' : 'sent', error } }];"
+      }
+    },
+    {
+      "id": "1ed69c6b-e058-4a32-a449-1b90f543f776",
+      "name": "Sign receipt",
+      "type": "n8n-nodes-base.jwt",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        0
+      ],
+      "parameters": {
+        "useJson": true,
+        "claimsJson": "={{ JSON.stringify({ iss: 'lendloop-n8n', aud: 'lendloop-convex', scope: 'notification-receipts:write', jti: $json.eventId + ':receipt', exp: Math.floor(Date.now() / 1000) + 300, eventId: $json.eventId, status: $json.status, channel: 'email', error: $json.error }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "jwtAuth": {
+          "id": "LLjwtN8nToConvex",
+          "name": "LendLoop: n8n -> Convex signing key"
+        }
+      }
+    },
+    {
+      "id": "4d9abfee-c30f-4b16-aa98-7e04bd1aa1ae",
+      "name": "Write receipt to Convex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1740,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').first().json.convexSiteUrl }}/n8n/notification-receipts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "f2a0e93e-eb24-4329-a084-a6e0b305fe94",
+      "name": "Email failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1960,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "c0b99437-c5a2-4985-ac6a-d1cc672adbe6",
+              "leftValue": "={{ $('Record result').first().json.status }}",
+              "rightValue": "failed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ccacfa4f-611f-477a-a465-153f5346656b",
+      "name": "Fail the run",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2180,
+        -100
+      ],
+      "parameters": {
+        "errorMessage": "=Could not email the {{ $('Record result').first().json.type }} notification: {{ $('Record result').first().json.error }}"
+      }
+    },
+    {
+      "id": "da5ef94b-01b2-4ce5-a9ff-22657325c434",
+      "name": "Done",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2180,
+        100
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Loan event (signed by Convex)": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Check claims and build email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check claims and build email": {
+      "main": [
+        [
+          {
+            "node": "Valid event?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid event?": {
+      "main": [
+        [
+          {
+            "node": "Already emailed?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject: 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already emailed?": {
+      "main": [
+        [
+          {
+            "node": "Reply: duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Accept: 202",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accept: 202": {
+      "main": [
+        [
+          {
+            "node": "Email the neighbour",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email the neighbour": {
+      "main": [
+        [
+          {
+            "node": "Record result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record result": {
+      "main": [
+        [
+          {
+            "node": "Sign receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign receipt": {
+      "main": [
+        [
+          {
+            "node": "Write receipt to Convex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write receipt to Convex": {
+      "main": [
+        [
+          {
+            "node": "Email failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email failed?": {
+      "main": [
+        [
+          {
+            "node": "Fail the run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "LLerrorHandlerWf",
+    "executionTimeout": 120
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

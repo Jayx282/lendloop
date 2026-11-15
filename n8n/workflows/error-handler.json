@@ -1,0 +1,232 @@
+{
+  "id": "LLerrorHandlerWf",
+  "name": "LendLoop: Error handler",
+  "nodes": [
+    {
+      "id": "56ae49ae-eda6-4af3-a080-3ef37a3a167f",
+      "name": "About this workflow",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        -360
+      ],
+      "parameters": {
+        "content": "## Error handler\nThe error workflow (Settings → Error workflow) of both LendLoop workflows, so no failed run goes unnoticed:\n\n- **Email the admin** with the workflow, node, message and a link to the execution (Mailpit locally).\n- **Report to LendLoop:** `POST /n8n/failures`, signed, idempotent per execution ID. It shows up on the app's admin page under *Failed n8n runs*.\n\nEach step has 3 tries and continues on failure, so one broken channel doesn't hide the other.",
+        "width": 600,
+        "height": 260,
+        "color": 7
+      }
+    },
+    {
+      "id": "d67306ce-db72-4b5a-ae80-c6edc75ca5f3",
+      "name": "When a LendLoop workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "2750f96b-a124-47d8-ac87-e7caf617f093",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -20,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dc7d6253-2e93-4faa-a21f-f6ab17eb9295",
+              "name": "convexSiteUrl",
+              "value": "http://convex-backend:3211",
+              "type": "string"
+            },
+            {
+              "id": "d1339721-3eb2-4830-adc8-f13b607b82c6",
+              "name": "fromEmail",
+              "value": "LendLoop <no-reply@lendloop.local>",
+              "type": "string"
+            },
+            {
+              "id": "d2c18037-c698-4478-a10d-fcc7f0bcfa1d",
+              "name": "adminEmail",
+              "value": "admin@lendloop.local",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "9e171f57-1efd-4200-a3ac-df8512e34c75",
+      "name": "Describe the failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Error Trigger output: { execution: { id, url, error, lastNodeExecuted }, workflow: { id, name } },\n// or { trigger: { error }, workflow } when a trigger itself failed to start.\nconst execution = $json.execution ?? {};\nconst error = execution.error ?? $json.trigger?.error ?? {};\nreturn [{\n  json: {\n    workflowName: $json.workflow?.name ?? 'unknown workflow',\n    executionId: String(execution.id ?? 'trigger-' + $json.workflow?.id + '-' + Date.now()),\n    node: execution.lastNodeExecuted ?? null,\n    message: String(error.message ?? 'Unknown error').slice(0, 500),\n    url: execution.url ?? null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "e7cb9a54-728d-4df1-a6c7-e8e003f7bd63",
+      "name": "Email the admin",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        420,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "fromEmail": "={{ $('Settings').first().json.fromEmail }}",
+        "toEmail": "={{ $('Settings').first().json.adminEmail }}",
+        "subject": "=[LendLoop] n8n workflow failed: {{ $json.workflowName }}",
+        "emailFormat": "text",
+        "text": "=Workflow: {{ $json.workflowName }}\nNode: {{ $json.node ?? 'n/a' }}\nError: {{ $json.message }}\nExecution: {{ $json.url ?? $json.executionId }}\n\nThe failure is also listed on the LendLoop admin page.",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "LLsmtpMailpit001",
+          "name": "LendLoop: SMTP (Mailpit)"
+        }
+      }
+    },
+    {
+      "id": "b6e5dccd-b850-4030-acb1-f3d9e4ceb5e7",
+      "name": "Sign failure report",
+      "type": "n8n-nodes-base.jwt",
+      "typeVersion": 1,
+      "position": [
+        640,
+        0
+      ],
+      "parameters": {
+        "useJson": true,
+        "claimsJson": "={{ JSON.stringify({ iss: 'lendloop-n8n', aud: 'lendloop-convex', scope: 'failures:write', jti: 'failure:' + $('Describe the failure').first().json.executionId, exp: Math.floor(Date.now() / 1000) + 300, executionId: $('Describe the failure').first().json.executionId, workflowName: $('Describe the failure').first().json.workflowName, node: $('Describe the failure').first().json.node ?? undefined, message: $('Describe the failure').first().json.message }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "jwtAuth": {
+          "id": "LLjwtN8nToConvex",
+          "name": "LendLoop: n8n -> Convex signing key"
+        }
+      }
+    },
+    {
+      "id": "694412b4-b27c-46a7-a8c2-e1fd4e43cf20",
+      "name": "Report to LendLoop",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        860,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').first().json.convexSiteUrl }}/n8n/failures",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "When a LendLoop workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Describe the failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe the failure": {
+      "main": [
+        [
+          {
+            "node": "Email the admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email the admin": {
+      "main": [
+        [
+          {
+            "node": "Sign failure report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign failure report": {
+      "main": [
+        [
+          {
+            "node": "Report to LendLoop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 120
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

@@ -1,0 +1,640 @@
+{
+  "id": "LLoverdueRemindr",
+  "name": "LendLoop: Overdue reminders",
+  "nodes": [
+    {
+      "id": "c5987806-0e11-4fcf-ae41-b7e15c6fcf7b",
+      "name": "About this workflow",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        -460
+      ],
+      "parameters": {
+        "content": "## Overdue reminders\nRuns every day at 09:00 (instance time zone, `GENERIC_TIMEZONE`), or when an admin clicks **Run overdue check now** (signed webhook).\n\n1. **Fetch and claim** overdue loans: `POST /n8n/overdue-loans`, signed with the *n8n -> Convex* credential. Convex returns the loans that still need today's reminder and reserves each one for this run (30-minute lease), so an overlapping run (schedule + button, or a slow retry) gets nothing to send.\n2. For each loan, one at a time: email the borrower (3 tries), then write the status back with `POST /n8n/reminders`, keyed by `reminderKey` = `loanId:date`. `sent` is final, so retries and re-runs never create a second record or a second email; `failed` makes the loan eligible again on the next run.\n3. If any reminder failed, the run fails, which triggers **LendLoop: Error handler**.\n\nOne loan per iteration, so a retry can never re-send an email that already went out.",
+        "width": 660,
+        "height": 340,
+        "color": 7
+      }
+    },
+    {
+      "id": "d1a162b4-71f1-4397-a6cf-4198393e0265",
+      "name": "Every day at 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -240,
+        -40
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 9 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "0dd5e956-da66-4e75-adf5-cc55445fa356",
+      "name": "Run now (admin button)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -240,
+        200
+      ],
+      "webhookId": "69e2bda7-127a-488a-a98a-d8dcb16f46a3",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop/overdue-sweep",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "jwtAuth": {
+          "id": "LLjwtConvexToN8n",
+          "name": "LendLoop: Convex -> n8n signing key"
+        }
+      }
+    },
+    {
+      "id": "101c37ba-249c-4b35-aa90-2178c209aba5",
+      "name": "Sweep request from Convex?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        -20,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "e64ecc5f-f2d9-4b69-a886-241b8b15758a",
+              "leftValue": "={{ $json.jwtPayload.iss }}",
+              "rightValue": "lendloop-convex",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "69ab3a6e-dc68-47af-ab2c-d4673d4309a2",
+              "leftValue": "={{ $json.jwtPayload.aud }}",
+              "rightValue": "lendloop-n8n",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "eb3e8ece-e524-4599-a7f6-b7b5b31f8135",
+              "leftValue": "={{ $json.jwtPayload.kind }}",
+              "rightValue": "overdue_sweep",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d22a9fda-ea3f-49c5-a481-801bd47b3f39",
+      "name": "Accept: 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        200,
+        120
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\":\"accepted\"}",
+        "options": {
+          "responseCode": 202
+        }
+      }
+    },
+    {
+      "id": "03f7074c-2e49-4d27-aa97-d5581f5f0e96",
+      "name": "Reject: 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        200,
+        320
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"error\":\"invalid request\"}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "94ac64dd-b90a-40f5-a606-3e880da3c2de",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        420,
+        -40
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dc7d6253-2e93-4faa-a21f-f6ab17eb9295",
+              "name": "convexSiteUrl",
+              "value": "http://convex-backend:3211",
+              "type": "string"
+            },
+            {
+              "id": "d1339721-3eb2-4830-adc8-f13b607b82c6",
+              "name": "fromEmail",
+              "value": "LendLoop <no-reply@lendloop.local>",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "5f479512-d971-4b7c-ad28-1300ff2af581",
+      "name": "Sign claim request",
+      "type": "n8n-nodes-base.jwt",
+      "typeVersion": 1,
+      "position": [
+        640,
+        -40
+      ],
+      "parameters": {
+        "useJson": true,
+        "claimsJson": "={{ JSON.stringify({ iss: 'lendloop-n8n', aud: 'lendloop-convex', scope: 'overdue-loans:claim', jti: 'overdue:' + $execution.id, exp: Math.floor(Date.now() / 1000) + 300, run: $execution.id }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "jwtAuth": {
+          "id": "LLjwtN8nToConvex",
+          "name": "LendLoop: n8n -> Convex signing key"
+        }
+      }
+    },
+    {
+      "id": "fea68c40-a5b6-4431-a54b-58995544bb41",
+      "name": "Fetch and claim overdue loans",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        860,
+        -40
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').first().json.convexSiteUrl }}/n8n/overdue-loans",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "49808b35-00f1-442c-ab53-5e8e6bc98bc5",
+      "name": "One item per loan",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1.1,
+      "position": [
+        1080,
+        -40
+      ],
+      "parameters": {
+        "fieldToSplitOut": "loans",
+        "options": {}
+      }
+    },
+    {
+      "id": "80d7f01b-1ec2-417f-a0d8-209b85ee7096",
+      "name": "One loan at a time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1300,
+        -40
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "e4c731ee-f329-486c-ab8d-b688b839fcf8",
+      "name": "Email the borrower",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1520,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "fromEmail": "={{ $('Settings').first().json.fromEmail }}",
+        "toEmail": "={{ $json.borrower.email }}",
+        "subject": "=Reminder: please return the {{ $json.tool.name }}",
+        "emailFormat": "text",
+        "text": "=Hi {{ $json.borrower.name }},\n\nThe {{ $json.tool.name }} you borrowed from {{ $json.lender.name }} was due back on {{ DateTime.fromISO($json.dueDate, { zone: 'utc' }).toFormat('ccc d LLL') }}, {{ $json.daysOverdue }} day{{ $json.daysOverdue === 1 ? '' : 's' }} ago.\n\nPlease return it, or get in touch with {{ $json.lender.name }} through LendLoop if you need more time.\n\n– LendLoop",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "LLsmtpMailpit001",
+          "name": "LendLoop: SMTP (Mailpit)"
+        }
+      }
+    },
+    {
+      "id": "43e0da73-0c82-4ff3-a852-65d4286cba56",
+      "name": "Sign write-back",
+      "type": "n8n-nodes-base.jwt",
+      "typeVersion": 1,
+      "position": [
+        1740,
+        80
+      ],
+      "parameters": {
+        "useJson": true,
+        "claimsJson": "={{ JSON.stringify({ iss: 'lendloop-n8n', aud: 'lendloop-convex', scope: 'reminders:write', jti: $('One loan at a time').item.json.reminderKey, exp: Math.floor(Date.now() / 1000) + 300, reminderKey: $('One loan at a time').item.json.reminderKey, loanId: $('One loan at a time').item.json.loanId, status: $json.error ? 'failed' : 'sent', channel: 'email', error: $json.error ? String($json.error.message ?? $json.error) : undefined, executionId: $execution.id }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "jwtAuth": {
+          "id": "LLjwtN8nToConvex",
+          "name": "LendLoop: n8n -> Convex signing key"
+        }
+      }
+    },
+    {
+      "id": "5368e09c-661a-43b2-a2ff-13f1c05213c9",
+      "name": "Write reminder status to Convex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1960,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').first().json.convexSiteUrl }}/n8n/reminders",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "f6f31e05-8694-495a-a366-b62acf0f1013",
+      "name": "Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2180,
+        80
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f28b0511-2dba-4190-ad37-04d80e7bbbc6",
+              "name": "loanId",
+              "value": "={{ $('One loan at a time').item.json.loanId }}",
+              "type": "string"
+            },
+            {
+              "id": "53906c0e-b4f7-4573-acc1-4edc038c4652",
+              "name": "status",
+              "value": "={{ $('Email the borrower').item.json.error ? 'failed' : 'sent' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "e961ade9-6005-4e57-ade7-617d97c5acd5",
+      "name": "Summarize run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "// One item per loan, collected by the loop.\nconst results = $input.all().map((item) => item.json);\nconst failed = results.filter((r) => r.status === 'failed');\nreturn [{\n  json: {\n    total: results.length,\n    sent: results.length - failed.length,\n    failed: failed.length,\n    failedLoans: failed.map((r) => r.loanId),\n  },\n}];"
+      }
+    },
+    {
+      "id": "ce82d915-931b-4d2f-ac3d-5b7849141e43",
+      "name": "Any reminder failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1740,
+        -200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "97e756f3-f6ee-44cc-a30b-f8ad65b6969f",
+              "leftValue": "={{ $json.failed }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e0e65204-7c4a-404c-a2d1-22666e620e15",
+      "name": "Fail the run",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1960,
+        -300
+      ],
+      "parameters": {
+        "errorMessage": "={{ $json.failed }} of {{ $json.total }} overdue reminders could not be sent"
+      }
+    },
+    {
+      "id": "5af12273-cc58-4b7d-a3f3-830d100f0faf",
+      "name": "Done",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1960,
+        -120
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Every day at 09:00": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (admin button)": {
+      "main": [
+        [
+          {
+            "node": "Sweep request from Convex?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sweep request from Convex?": {
+      "main": [
+        [
+          {
+            "node": "Accept: 202",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject: 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accept: 202": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Sign claim request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign claim request": {
+      "main": [
+        [
+          {
+            "node": "Fetch and claim overdue loans",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch and claim overdue loans": {
+      "main": [
+        [
+          {
+            "node": "One item per loan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per loan": {
+      "main": [
+        [
+          {
+            "node": "One loan at a time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One loan at a time": {
+      "main": [
+        [
+          {
+            "node": "Summarize run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email the borrower",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email the borrower": {
+      "main": [
+        [
+          {
+            "node": "Sign write-back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign write-back": {
+      "main": [
+        [
+          {
+            "node": "Write reminder status to Convex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write reminder status to Convex": {
+      "main": [
+        [
+          {
+            "node": "Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Result": {
+      "main": [
+        [
+          {
+            "node": "One loan at a time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize run": {
+      "main": [
+        [
+          {
+            "node": "Any reminder failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any reminder failed?": {
+      "main": [
+        [
+          {
+            "node": "Fail the run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "LLerrorHandlerWf",
+    "executionTimeout": 900
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
