@@ -11,8 +11,7 @@
 
 name: lendloop
 
-x-n8n-environment: &n8n-environment
-  # Schedules (the 09:00 overdue sweep) run in this time zone.
+x-n8n-environment: &n8n-environment # Schedules (the 09:00 overdue sweep) run in this time zone.
   GENERIC_TIMEZONE: ${LENDLOOP_TIMEZONE:-Asia/Kolkata}
   TZ: ${LENDLOOP_TIMEZONE:-Asia/Kolkata}
   N8N_HOST: localhost
