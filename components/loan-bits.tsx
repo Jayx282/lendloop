@@ -10,7 +10,7 @@ type Availability = { state: "available"; bookedFrom?: string } | { state: "on_l
 export function AvailabilityBadge({ availability }: { availability: Availability }) {
   if (availability.state === "on_loan") {
     return availability.overdue ? (
-      <Badge tone="red">Overdue since {formatDay(availability.until)}</Badge>
+      <Badge tone="red">Overdue: was due {formatDay(availability.until)}</Badge>
     ) : (
       <Badge tone="amber">On loan until {formatDay(availability.until)}</Badge>
     );

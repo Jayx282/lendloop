@@ -14,10 +14,12 @@ export default clerkMiddleware(
     }
   },
   {
-    // Clerk's CSP defaults, plus the Convex deployment (HTTPS + WebSocket).
+    // Clerk's CSP defaults, plus the Convex deployment (HTTPS + WebSocket) and
+    // inline data: images (decorative SVGs in Clerk's components; images can't run code).
     contentSecurityPolicy: {
       directives: {
         "connect-src": [convexUrl, convexUrl.replace(/^http/, "ws")],
+        "img-src": ["data:"],
         "frame-ancestors": ["'none'"],
       },
     },

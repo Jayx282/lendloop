@@ -19,6 +19,8 @@ const ViewerContext = createContext<ViewerState>({ status: "loading" });
 /**
  * Once Convex has accepted the Clerk token, creates/refreshes the user row
  * (users.sync) and exposes the signed-in user's profile and role to the UI.
+ * A returning user is shown as soon as their row loads, while the profile
+ * refresh runs in the background; a first-time user waits for the row to exist.
  * The role is only used to decide what to show; Convex enforces it.
  */
 export function ViewerProvider({ children }: { children: ReactNode }) {
@@ -26,7 +28,7 @@ export function ViewerProvider({ children }: { children: ReactNode }) {
   const sync = useMutation(api.users.sync);
   const [synced, setSynced] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const me = useQuery(api.users.me, isAuthenticated && synced ? {} : "skip");
+  const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -48,10 +50,10 @@ export function ViewerProvider({ children }: { children: ReactNode }) {
   let state: ViewerState;
   if (isLoading) state = { status: "loading" };
   else if (!isAuthenticated) state = { status: "signed-out" };
+  else if (me) state = { status: "ready", viewer: me };
   else if (syncError) state = { status: "error", message: syncError };
-  else if (!synced || me === undefined) state = { status: "loading" };
-  else if (me === null) state = { status: "error", message: "We couldn't load your account." };
-  else state = { status: "ready", viewer: me };
+  else if (me === undefined || !synced) state = { status: "loading" };
+  else state = { status: "error", message: "We couldn't load your account." };
 
   return <ViewerContext.Provider value={state}>{children}</ViewerContext.Provider>;
 }

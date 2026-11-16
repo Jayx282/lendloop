@@ -147,6 +147,25 @@ self-hosted in Docker, so they need no accounts.
 
 4. Copy `.env.example` to `.env.local` and fill in `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` (from
    **API keys**) and `CLERK_FRONTEND_API_URL`.
+5. Optional: under **User & authentication**, ask for a first name at sign-up, so neighbours see "Asha K." rather
+   than "Neighbour".
+
+<details>
+<summary>Prefer the terminal? The Clerk CLI does all of the above.</summary>
+
+```bash
+npx clerk@latest auth login              # opens the browser once
+npx clerk@latest apps create "LendLoop" --json
+# Use the application ID it prints (app_...):
+npx clerk@latest env pull --app <app_id> --instance dev --print   # copy the two keys into .env.local
+npx clerk@latest config patch --app <app_id> --instance dev --yes --json \
+  '{"session":{"claims":{"aud":"convex","name":"{{user.full_name}}","given_name":"{{user.first_name}}","family_name":"{{user.last_name}}","email":"{{user.primary_email_address}}","email_verified":"{{user.email_verified}}"}},"user_model":{"first_name":{"enabled":true,"required":true},"last_name":{"enabled":true,"required":false}}}'
+```
+
+`CLERK_FRONTEND_API_URL` is `https://` plus the publishable key decoded (the part after `pk_test_` is base64 of the
+Frontend API host, followed by `$`). The `aud: "convex"` session claim is what Clerk's Convex integration sets.
+
+</details>
 
 ### 2. Everything else
 
@@ -369,7 +388,9 @@ npm run lint
   write-backs, receipts and failure reports are idempotent; a failed reminder is retried by the next run.
 
 I also ran the full stack by hand: signed and forged webhooks, duplicate events, the admin retry, Mailpit stopped
-mid-run, overlapping sweeps, and the cron trigger.
+mid-run, overlapping sweeps, and the cron trigger. In the browser, with a real Clerk account (GitHub sign-in), I went
+through every signed-in flow (request, approve, mark returned, cancel, list, edit and delete a tool, the admin
+removal, Trusted Lender and "Run overdue check now"), plus a 375 px phone layout.
 
 ## Running it in production
 
