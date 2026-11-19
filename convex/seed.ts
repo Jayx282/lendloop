@@ -1,6 +1,7 @@
 import { internalMutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { addDays, todayUtc } from "./lib/dates";
+import { sealEmail } from "./lib/personalData";
 
 /**
  * Local demo data: three neighbours, a few tools and loans in every state,
@@ -19,11 +20,11 @@ export const demo = internalMutation({
     if (existing) return "Demo data already exists.";
 
     const today = todayUtc();
-    const user = (slug: string, displayName: string, trustedLender = false) =>
+    const user = async (slug: string, displayName: string, trustedLender = false) =>
       ctx.db.insert("users", {
         tokenIdentifier: `demo|${slug}`,
         displayName,
-        email: `${slug}@example.com`,
+        ...(await sealEmail(`demo|${slug}`, `${slug}@example.com`)),
         role: "user",
         trustedLender,
         trustedLenderSince: trustedLender ? Date.now() : undefined,

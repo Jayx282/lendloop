@@ -3,6 +3,7 @@ import type { Id } from "./_generated/dataModel";
 import { query, type MutationCtx } from "./_generated/server";
 import { userMutation, userQuery } from "./functions";
 import { fail, type Viewer } from "./lib/auth";
+import { appendAudit } from "./lib/audit";
 import { approvedLoans, availabilityOf } from "./lib/availability";
 import { LIMITS, categoryValidator, conditionValidator } from "./lib/constants";
 import { todayUtc } from "./lib/dates";
@@ -183,7 +184,7 @@ export const remove = userMutation({
       isOwner ? "Listing deleted by its owner." : "Listing removed by an admin.",
     );
     if (!isOwner) {
-      await ctx.db.insert("auditLog", {
+      await appendAudit(ctx, {
         actorId: ctx.viewer._id,
         action: "tool.removed_by_admin",
         targetId: toolId,

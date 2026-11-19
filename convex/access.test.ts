@@ -26,11 +26,13 @@ async function world() {
 }
 
 describe("users", () => {
-  test("sync stores a short display name and the verified email from the token", async () => {
+  test("sync stores a short display name and only an encrypted copy of the verified email", async () => {
     const { t, as } = setup();
     const { id } = await signedIn(as("u1", "Asha Kumar", "Asha@Example.com"));
     const user = await t.run((ctx) => ctx.db.get(id));
-    expect(user).toMatchObject({ displayName: "Asha K.", email: "asha@example.com", role: "user" });
+    expect(user).toMatchObject({ displayName: "Asha K.", role: "user" });
+    expect(user?.emailCiphertext).toMatch(/^v1\./);
+    expect(JSON.stringify(user)).not.toMatch(/asha@example\.com/i);
   });
 
   test("sync ignores unverified emails", async () => {
@@ -38,7 +40,7 @@ describe("users", () => {
     const id = await t
       .withIdentity({ subject: "u2", issuer: "https://clerk.test", email: "x@example.com", emailVerified: false })
       .mutation(api.users.sync, {});
-    expect((await t.run((ctx) => ctx.db.get(id)))?.email).toBeUndefined();
+    expect((await t.run((ctx) => ctx.db.get(id)))?.emailCiphertext).toBeUndefined();
   });
 
   test("signed-out callers are rejected", async () => {

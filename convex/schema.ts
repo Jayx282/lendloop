@@ -14,13 +14,16 @@ export default defineSchema({
   users: defineTable({
     tokenIdentifier: v.string(), // "<issuer>|<subject>" from the verified Clerk token
     displayName: v.string(), // what neighbours see, e.g. "Asha K."
-    email: v.optional(v.string()), // only used to notify this user; shared with the other party of an approved loan
+    // The verified email, used only to notify this user and shared only with the other
+    // party of an approved loan. Never stored in plaintext (lib/fieldEncryption.ts):
+    emailCiphertext: v.optional(v.string()), // AES-256-GCM, bound to this row
+    emailHash: v.optional(v.string()), // HMAC blind index, for exact-match lookups
     role: roleValidator, // changed only by an internal function (CLI) or by another admin
     trustedLender: v.boolean(),
     trustedLenderSince: v.optional(v.number()),
   })
     .index("by_token", ["tokenIdentifier"])
-    .index("by_email", ["email"]),
+    .index("by_email_hash", ["emailHash"]),
 
   tools: defineTable({
     ownerId: v.id("users"),
@@ -113,8 +116,10 @@ export default defineSchema({
     detail: v.optional(v.string()),
   }).index("by_key", ["key"]),
 
-  // Append-only record of privileged actions.
+  // Append-only, hash-chained record of privileged actions (lib/audit.ts).
   auditLog: defineTable({
+    seq: v.number(), // 1, 2, 3, ... with no gaps
+    at: v.number(),
     actorId: v.optional(v.id("users")), // absent when run from the CLI with the deploy/admin key
     action: v.union(
       v.literal("tool.removed_by_admin"),
@@ -122,8 +127,13 @@ export default defineSchema({
       v.literal("user.role_set"),
       v.literal("loan_event.retried"),
       v.literal("automation.overdue_sweep_requested"),
+      v.literal("security.emails_reencrypted"),
     ),
     targetId: v.string(),
     detail: v.optional(v.string()),
-  }).index("by_actor", ["actorId"]),
+    prevHash: v.string(), // hash of entry seq - 1 ("genesis" for the first)
+    hash: v.string(), // SHA-256 over this entry's fields and prevHash
+  })
+    .index("by_seq", ["seq"])
+    .index("by_actor", ["actorId"]),
 });

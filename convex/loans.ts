@@ -7,6 +7,7 @@ import { loanActivity } from "./lib/activity";
 import { approvedLoans } from "./lib/availability";
 import { LIMITS } from "./lib/constants";
 import { addDays, daysBetween, isIsoDay, rangesOverlap, todayUtc } from "./lib/dates";
+import { openEmail } from "./lib/personalData";
 import { cleanText } from "./lib/text";
 import { enqueueLoanEvent } from "./notifications";
 
@@ -193,7 +194,7 @@ async function describeLoan(
     tool: { name: tool?.name ?? "Removed tool", category: tool?.category, removed: tool?.removedAt !== undefined },
     lender: { displayName: lender?.displayName ?? "Neighbour", trustedLender: lender?.trustedLender ?? false },
     borrower: { displayName: borrower?.displayName ?? "Neighbour" },
-    contactEmail: shareContact ? counterpart?.email : undefined,
+    contactEmail: shareContact && counterpart ? await openEmail(counterpart) : undefined,
     activity: await loanActivity(ctx, loan._id, { includeErrors: perspective === "admin" }),
   };
 }

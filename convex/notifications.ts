@@ -5,7 +5,9 @@ import { internalAction, internalMutation, internalQuery, type MutationCtx } fro
 import { adminMutation } from "./functions";
 import { fail } from "./lib/auth";
 import type { LoanEventType } from "./lib/constants";
+import { appendAudit } from "./lib/audit";
 import { signForN8n } from "./lib/jwt";
+import { openEmail } from "./lib/personalData";
 import { truncate } from "./lib/text";
 
 // Convex -> n8n loan events, delivered with a transactional outbox:
@@ -59,7 +61,9 @@ export const prepareDelivery = internalQuery({
     const tool = loan ? await ctx.db.get(loan.toolId) : null;
     const recipient = await ctx.db.get(event.recipientId);
     if (!loan || !tool || !recipient) return { kind: "skip" as const, reason: "Loan data no longer exists." };
-    if (!recipient.email) return { kind: "skip" as const, reason: "Recipient has no email address on file." };
+    // Decrypted only here, to hand the address to n8n for this one message.
+    const email = await openEmail(recipient);
+    if (!email) return { kind: "skip" as const, reason: "Recipient has no usable email address on file." };
 
     const role = RECIPIENT_ROLE[event.type];
     const counterpart = await ctx.db.get(role === "lender" ? loan.borrowerId : loan.lenderId);
@@ -68,7 +72,7 @@ export const prepareDelivery = internalQuery({
       kind: "send" as const,
       payload: {
         type: event.type,
-        recipient: { name: recipient.displayName, email: recipient.email, role },
+        recipient: { name: recipient.displayName, email, role },
         counterpart: { name: counterpart?.displayName ?? "A neighbour" },
         tool: { name: tool.name },
         loan: {
@@ -223,10 +227,11 @@ export const retry = adminMutation({
       notification: undefined,
     });
     await ctx.scheduler.runAfter(0, internal.notifications.deliver, { eventId });
-    await ctx.db.insert("auditLog", {
+    await appendAudit(ctx, {
       actorId: ctx.viewer._id,
       action: "loan_event.retried",
       targetId: eventId,
+      detail: event.type,
     });
   },
 });

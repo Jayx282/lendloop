@@ -7,6 +7,11 @@ import schema from "./schema";
 
 export const modules = import.meta.glob("./**/*.*s");
 
+// Test-only data keys (32 bytes each, base64). Never used outside the test runner.
+export const TEST_DATA_KEY = "dGVzdC1rZXktb25lLTMyLWJ5dGVzLWxvbmctLS0tLSE=";
+export const TEST_DATA_KEY_2 = "dGVzdC1rZXktdHdvLTMyLWJ5dGVzLWxvbmctLS0tLSE=";
+process.env.LENDLOOP_DATA_KEY = TEST_DATA_KEY;
+
 export function setup() {
   const t = convexTest(schema, modules);
   const as = (subject: string, name: string, email = `${subject}@example.com`) =>

@@ -3,8 +3,10 @@ import { internal } from "./_generated/api";
 import { internalAction, internalMutation, type MutationCtx } from "./_generated/server";
 import { adminMutation, adminQuery } from "./functions";
 import { notificationState } from "./lib/activity";
+import { appendAudit } from "./lib/audit";
 import { daysBetween, isIsoDay, todayUtc } from "./lib/dates";
 import { signForN8n } from "./lib/jwt";
+import { openEmail } from "./lib/personalData";
 import { truncate } from "./lib/text";
 
 // Functions behind the n8n HTTP endpoints (see http.ts) plus the admin
@@ -67,7 +69,8 @@ export const claimOverdueReminders = internalMutation({
         ctx.db.get(loan.lenderId),
         ctx.db.get(loan.toolId),
       ]);
-      if (!borrower?.email) {
+      const borrowerEmail = borrower ? await openEmail(borrower) : undefined;
+      if (!borrower || !borrowerEmail) {
         noEmail++;
         continue;
       }
@@ -89,7 +92,7 @@ export const claimOverdueReminders = internalMutation({
       loans.push({
         loanId: loan._id,
         reminderKey,
-        borrower: { name: borrower.displayName, email: borrower.email },
+        borrower: { name: borrower.displayName, email: borrowerEmail },
         lender: { name: lender?.displayName ?? "the lender" },
         tool: { name: tool?.name ?? "the tool" },
         dueDate: loan.endDate,
@@ -239,7 +242,7 @@ export const requestOverdueSweep = adminMutation({
   args: {},
   handler: async (ctx) => {
     await touchState(ctx, "overdue_sweep.manual_request", "requested");
-    await ctx.db.insert("auditLog", {
+    await appendAudit(ctx, {
       actorId: ctx.viewer._id,
       action: "automation.overdue_sweep_requested",
       targetId: "overdue_sweep",

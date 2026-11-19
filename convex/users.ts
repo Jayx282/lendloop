@@ -2,8 +2,10 @@ import type { UserIdentity } from "convex/server";
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { adminMutation, adminQuery } from "./functions";
+import { appendAudit } from "./lib/audit";
 import { fail, getViewer } from "./lib/auth";
 import { LIMITS, roleValidator } from "./lib/constants";
+import { emailLookupHash, normalizeEmail, sealEmail } from "./lib/personalData";
 
 // Neighbours see "Asha K.", never a full name.
 export function displayNameFrom(identity: Pick<UserIdentity, "givenName" | "familyName" | "name">): string {
@@ -15,7 +17,7 @@ export function displayNameFrom(identity: Pick<UserIdentity, "givenName" | "fami
 }
 
 function verifiedEmailFrom(identity: UserIdentity): string | undefined {
-  const email = identity.email?.trim().toLowerCase();
+  const email = identity.email ? normalizeEmail(identity.email) : undefined;
   if (!email || identity.emailVerified === false) return undefined;
   return email;
 }
@@ -39,16 +41,24 @@ export const sync = mutation({
       .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
       .unique();
 
+    // The email is compared by its blind index, so the stored one is never decrypted here.
+    // A row still on a rotated-out key gets re-encrypted the next time its owner signs in.
+    const emailHash = email ? await emailLookupHash(email) : undefined;
     if (existing) {
-      if (existing.displayName !== displayName || existing.email !== email) {
-        await ctx.db.patch(existing._id, { displayName, email });
+      if (existing.displayName !== displayName || existing.emailHash !== emailHash) {
+        await ctx.db.patch(existing._id, {
+          displayName,
+          ...(email
+            ? await sealEmail(identity.tokenIdentifier, email)
+            : { emailCiphertext: undefined, emailHash: undefined }),
+        });
       }
       return existing._id;
     }
     return await ctx.db.insert("users", {
       tokenIdentifier: identity.tokenIdentifier,
       displayName,
-      email,
+      ...(email ? await sealEmail(identity.tokenIdentifier, email) : {}),
       role: "user",
       trustedLender: false,
     });
@@ -66,7 +76,7 @@ export const me = query({
       displayName: viewer.displayName,
       role: viewer.role,
       trustedLender: viewer.trustedLender,
-      hasEmail: viewer.email !== undefined,
+      hasEmail: viewer.emailCiphertext !== undefined,
     };
   },
 });
@@ -105,11 +115,11 @@ export const setTrustedLender = adminMutation({
       trustedLender: trusted,
       trustedLenderSince: trusted ? Date.now() : undefined,
     });
-    await ctx.db.insert("auditLog", {
+    await appendAudit(ctx, {
       actorId: ctx.viewer._id,
       action: "user.trusted_lender_set",
       targetId: userId,
-      detail: trusted ? "trusted" : "not trusted",
+      detail: `${user.displayName}: ${trusted ? "trusted" : "not trusted"}`,
     });
   },
 });
@@ -122,9 +132,11 @@ export const setTrustedLender = adminMutation({
 export const setRole = internalMutation({
   args: { email: v.string(), role: roleValidator },
   handler: async (ctx, { email, role }) => {
+    // Found through the blind index: emails are encrypted, so they can't be searched directly.
+    const emailHash = await emailLookupHash(email);
     const matches = await ctx.db
       .query("users")
-      .withIndex("by_email", (q) => q.eq("email", email.trim().toLowerCase()))
+      .withIndex("by_email_hash", (q) => q.eq("emailHash", emailHash))
       .take(2);
     if (matches.length === 0) {
       fail("No user with that email has signed in yet. Sign in once, then rerun this.", "NOT_FOUND");
@@ -132,7 +144,7 @@ export const setRole = internalMutation({
     if (matches.length > 1) fail("More than one user has that email.", "AMBIGUOUS");
     const user = matches[0];
     await ctx.db.patch(user._id, { role });
-    await ctx.db.insert("auditLog", { action: "user.role_set", targetId: user._id, detail: role });
+    await appendAudit(ctx, { action: "user.role_set", targetId: user._id, detail: `${user.displayName}: ${role}` });
     return { userId: user._id, displayName: user.displayName, role };
   },
 });

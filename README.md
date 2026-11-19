@@ -33,7 +33,7 @@ to Clerk.
 | **My listings** (`/listings`)     | List a tool (name, category, condition, short description), edit it, or delete it.                                                                                                            |
 | **My requests** (`/requests`)     | Your borrow requests and loans, their status and automation activity. Cancel a request, or an approved loan that hasn't started yet.                                                          |
 | **Incoming** (`/incoming`)        | Requests for your tools: approve or decline, then mark loans returned.                                                                                                                        |
-| **Admin** (`/admin`, admins only) | Automation health, every loan, Trusted Lender badges. Admins can also remove any listing from Browse.                                                                                         |
+| **Admin** (`/admin`, admins only) | Automation health, data protection (encryption coverage and a live check of the audit chain), every loan, Trusted Lender badges. Admins can also remove any listing from Browse.              |
 
 Every loan shows its recent automation activity, for example _"Borrower emailed about the approval · 5 minutes
 ago"_ or _"Overdue reminder sent to the borrower · 2 days ago"_.
@@ -177,12 +177,13 @@ npm run dev
 
 `npm run setup` is safe to re-run. It:
 
-1. generates `.env.automation` with two random 256-bit signing secrets (if it doesn't exist);
+1. generates `.env.automation` with two random 256-bit signing secrets, and `.env.convex` with a random 256-bit
+   data-encryption key (if they don't exist);
 2. starts the Docker stack (`docker compose up -d --wait`): Convex backend and dashboard, Mailpit, a one-shot
    `n8n-import` job that creates the n8n credentials from those secrets and imports + publishes the three
    workflows, and n8n itself;
 3. generates a Convex admin key into `.env.local`;
-4. sets the Convex environment variables (Clerk issuer, signing secrets, n8n webhook URLs);
+4. sets the Convex environment variables (Clerk issuer, signing secrets, data key, n8n webhook URLs);
 5. pushes the schema and functions (`convex dev --once`), and with `--seed` loads demo neighbours, tools and loans,
    including an overdue one.
 
@@ -214,6 +215,9 @@ If you change Convex functions, run `npm run dev:convex` in a second terminal to
 4. To see failure handling, stop Mailpit (`docker compose stop mailpit`) and request another tool. The n8n run fails
    after its retries, the error workflow records it, and the admin page lists it under **Failed notifications** and
    **Failed n8n runs**. Start Mailpit again and click **Retry**.
+5. **Admin → Security** shows every email encrypted and the audit chain verified, with its latest entries. Run
+   `npx convex data users` and you'll find only ciphertext. To see tamper detection, edit any `auditLog` entry in the
+   Convex dashboard (<http://localhost:6791>) and reload: the panel reports the exact entry that no longer verifies.
 
 ### Using Convex Cloud instead
 
@@ -225,8 +229,9 @@ each workflow to your deployment's `https://<name>.convex.site`.
 
 ## Environment variables
 
-Secrets live in exactly two places: gitignored env files on your machine, and the services' own secret stores
-(Convex environment variables, encrypted n8n credentials). None are in the code or the exported workflow JSON.
+Secrets live in exactly two places: gitignored env files on your machine (`.env.local`, `.env.automation`,
+`.env.convex`), and the services' own secret stores (Convex environment variables, encrypted n8n credentials). None
+are in the code or the exported workflow JSON.
 
 | Variable                                                       | Where it lives                                  | Used by                           | Notes                                                                 |
 | -------------------------------------------------------------- | ----------------------------------------------- | --------------------------------- | --------------------------------------------------------------------- |
@@ -240,6 +245,8 @@ Secrets live in exactly two places: gitignored env files on your machine, and th
 | `N8N_TO_CONVEX_SIGNING_SECRET`                                 | `.env.automation` → Convex env + n8n credential | n8n signs, Convex verifies        | A different secret per direction.                                     |
 | `N8N_LOAN_EVENTS_WEBHOOK_URL`, `N8N_OVERDUE_SWEEP_WEBHOOK_URL` | Convex env                                      | Convex actions                    | Set by setup to the n8n service on the Docker network.                |
 | `LENDLOOP_APP_URL`                                             | Convex env                                      | links in emails                   | `http://localhost:3000` locally.                                      |
+| `LENDLOOP_DATA_KEY`                                            | `.env.convex` → Convex env                      | Convex (field encryption)         | 32 random bytes, base64. Losing it makes stored emails unreadable.    |
+| `LENDLOOP_DATA_KEY_PREVIOUS`                                   | `.env.convex` → Convex env (rotation only)      | Convex (field encryption)         | The old key, set only while `security:reencryptEmails` runs.          |
 | `LENDLOOP_TIMEZONE`                                            | shell / `.env` (optional)                       | n8n schedule                      | Defaults to `Asia/Kolkata`.                                           |
 
 `.env.automation` is passed **only** to the one-shot `n8n-import` container (via `env_file`), which turns it into
@@ -332,8 +339,30 @@ value lives in the workflow instead.
 - **Roles can't be self-assigned.** `users.sync` takes no arguments: name and email come from the verified token, so
   a client can't claim another email. The admin role is granted only by an internal function run from the CLI
   with the deployment admin key (`npm run make-admin`), or changed by an existing admin's audited action.
-- **Audit log.** Admin removals, Trusted Lender changes, role changes, retries and manual sweeps are written to
-  `auditLog`.
+- **Personal data encrypted at rest.** Emails, the only personal data LendLoop keeps, are encrypted in the app before
+  they reach the database (`convex/lib/fieldEncryption.ts`). A database export, a backup or someone browsing the
+  Convex dashboard sees only ciphertext. The scheme:
+  - AES-256-GCM with a fresh random IV per value;
+  - keys derived with HKDF-SHA256 from one master key (`LENDLOOP_DATA_KEY`), with separate keys for encryption and
+    lookups;
+  - each ciphertext bound to its own row with associated data, so a value copied into another user's row fails to
+    decrypt;
+  - an HMAC "blind index", so `make-admin` can still find a user by email without decrypting anything.
+
+  Plaintext exists only where it's needed: building a notification or the overdue list for n8n, showing a contact
+  to the other party of an approved loan, and re-encrypting during a key rotation. Each value records its key,
+  so keys rotate without downtime: set the old key as `LENDLOOP_DATA_KEY_PREVIOUS`, then run
+  `security:reencryptEmails`. With no key configured, sign-up fails rather than storing plaintext. The key itself
+  sits in the Convex environment, so this protects data outside the running system (exports, backups, dashboard
+  access); production would keep it in a KMS ([docs/production.md](docs/production.md)).
+
+- **Tamper-evident audit trail.** Admin removals, Trusted Lender changes, role changes, retries, manual sweeps and
+  key rotations are appended to `auditLog` as a hash chain (`convex/lib/audit.ts`). Each entry stores a SHA-256
+  hash over its fields and the previous entry's hash. Editing, reordering or deleting any past entry breaks every
+  hash after it, and **Admin → Security** recomputes the chain on every load and names the first entry that fails.
+  Appends can't fork the chain, because each reads the current head inside its transaction, so concurrent appends
+  conflict and Convex retries one. A chain alone can't reveal someone deleting the _newest_ entries; the panel shows
+  the head hash for that reason, and production would anchor it outside the database.
 - **Signed integration in both directions.** Each message is a compact JWS (JWT) signed with HMAC-SHA256 and a
   shared secret, with a **separate secret per direction**. Compared with a custom `X-Signature` header it is the
   same primitive with standard claims: `exp` (5-minute replay window), `iss`/`aud` (direction), `jti` (idempotency
@@ -360,7 +389,7 @@ value lives in the workflow instead.
 - **Public list:** name and category only. The query's `returns` validator is the contract, so Convex rejects the
   response if any other field (owner, condition, IDs) ever leaks into it.
 - **Stored about a user:** a display name ("Asha K.", built from the token; never the full name), the email (only
-  if verified), role and Trusted Lender flag. No phone, avatar or profile copy.
+  if verified, and only encrypted), role and Trusted Lender flag. No phone, avatar or profile copy.
 - **Who sees an email:** only the two people on an approved loan, so they can arrange the hand-over. Lenders don't
   see a borrower's email before approving; admins never see emails (they don't need them to moderate).
 - **What n8n gets:** for a loan event, the recipient's display name and email, the other party's display name, the
@@ -375,7 +404,7 @@ value lives in the workflow instead.
 ## Tests
 
 ```bash
-npm test          # 25 Convex tests (vitest + convex-test)
+npm test          # 35 Convex tests (vitest + convex-test)
 npm run typecheck # app and Convex functions
 npm run lint
 ```
@@ -386,6 +415,10 @@ npm run lint
   `failed`, and skips recipients without an email; endpoints reject missing, forged, wrong-issuer and wrong-scope
   tokens; an overlapping run can't claim a reminder another run holds until its lease expires; reminder
   write-backs, receipts and failure reports are idempotent; a failed reminder is retried by the next run.
+- `convex/security.test.ts`: only ciphertext is stored and it decrypts where needed; a ciphertext moved to another
+  row doesn't decrypt; blind-index lookups ignore case; key rotation keeps old rows readable and then moves them;
+  sign-up fails closed without a key; the audit chain verifies, and editing, deleting or re-hashing an entry is
+  caught at that entry; only admins can read the security status.
 
 I also ran the full stack by hand: signed and forged webhooks, duplicate events, the admin retry, Mailpit stopped
 mid-run, overlapping sweeps, and the cron trigger. In the browser, with a real Clerk account (GitHub sign-in), I went
@@ -407,8 +440,9 @@ convex/                   schema, functions, HTTP endpoints for n8n, cron, tests
   functions.ts            userQuery / userMutation / adminQuery / adminMutation builders
   notifications.ts        outbox: enqueue, signed delivery with retries, receipts
   automation.ts           overdue list, reminder and failure write-backs, admin health
+  security.ts             encryption and audit-chain status, key rotation
   http.ts                 signed n8n endpoints
-  lib/                    auth, JWT, dates, availability, activity, validation
+  lib/                    auth, JWT, field encryption, audit chain, dates, availability, activity, validation
 n8n/workflows/            exported workflows (no secrets)
 n8n/bootstrap/            import script + credential builder for the n8n-import container
 scripts/                  setup and make-admin

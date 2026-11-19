@@ -12,6 +12,10 @@ roughly in priority order.
   the editor on a private network or SSO and the webhook path as the only public route. Pin the image version and
   upgrade deliberately. Run Code nodes in external task runners (`n8nio/runners` sidecar) instead of the
   deprecated internal mode.
+- **Envelope encryption with a KMS** for personal data. Today `LENDLOOP_DATA_KEY` sits in the Convex environment,
+  which protects exports, backups and dashboard access, but not someone who can read the deployment's settings. In
+  production a KMS key (AWS KMS, for example) would wrap per-tenant data keys. Only the backend's role would be
+  allowed to decrypt, and CloudTrail would log every decrypt, so access to patient-grade data is itself audited.
 - **Secrets in a manager** (AWS Secrets Manager or SSM Parameter Store, or n8n external secrets), never in `.env`
   files. That covers the two signing secrets, SMTP credentials, the Clerk keys, `N8N_ENCRYPTION_KEY` (backed up,
   because losing it makes every n8n credential unreadable) and the Convex deploy key. Rotate the signing secrets on a
@@ -49,8 +53,10 @@ roughly in priority order.
 - **Retention:** delete or anonymize loans, reminders and events after a fixed period (say 12 months), and keep n8n
   execution data for days, not weeks (or save only failed executions).
 - **Account deletion:** a Clerk `user.deleted` webhook that removes the user row and anonymizes their loans.
-- **Audit log** UI with export. In a regulated setting (healthcare, for example), ship audit records to write-once
-  storage (S3 Object Lock, CloudTrail Lake).
+- **Anchor the audit chain outside the database.** The hash chain catches any edit or deletion of past entries, but
+  someone with database access could still delete the newest ones unnoticed. Publishing the head hash daily to
+  write-once storage (S3 Object Lock, or CloudTrail Lake) closes that gap. Verification would then start from the
+  last anchored checkpoint instead of rehashing the whole log, and the log would get an export for auditors.
 - Keep email addresses out of n8n execution logs entirely: send n8n an opaque recipient ID and let a Convex endpoint
   resolve it at send time, or redact fields in the execution data.
 

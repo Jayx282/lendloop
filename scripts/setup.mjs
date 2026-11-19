@@ -78,6 +78,23 @@ for (const key of ["CONVEX_TO_N8N_SIGNING_SECRET", "N8N_TO_CONVEX_SIGNING_SECRET
   if ((automation[key] ?? "").length < 32) fail(`${key} in .env.automation must be at least 32 characters.`);
 }
 
+// 1b. The key that encrypts personal data in Convex. A separate file, because
+// .env.automation is handed to the n8n import container and this key isn't for n8n.
+step("Data encryption key (.env.convex)");
+if (!fs.existsSync(".env.convex")) {
+  fs.writeFileSync(".env.convex", `LENDLOOP_DATA_KEY=${randomBytes(32).toString("base64")}\n`, { mode: 0o600 });
+  console.log("  generated a random 256-bit key");
+} else {
+  console.log("  already present, keeping it");
+}
+const dataKeys = readEnv(".env.convex");
+for (const key of ["LENDLOOP_DATA_KEY", "LENDLOOP_DATA_KEY_PREVIOUS"]) {
+  const value = dataKeys[key];
+  if (value === undefined || (value === "" && key.endsWith("_PREVIOUS"))) continue;
+  if (Buffer.from(value, "base64").length !== 32) fail(`${key} in .env.convex must be 32 bytes, base64-encoded.`);
+}
+if (!dataKeys.LENDLOOP_DATA_KEY) fail("LENDLOOP_DATA_KEY is missing from .env.convex.");
+
 // 2. App settings: Clerk keys are the only thing you have to provide.
 step("App settings (.env.local)");
 if (!fs.existsSync(".env.local")) {
@@ -126,6 +143,9 @@ const convexEnv = {
   N8N_LOAN_EVENTS_WEBHOOK_URL: "http://n8n:5678/webhook/lendloop/loan-events",
   N8N_OVERDUE_SWEEP_WEBHOOK_URL: "http://n8n:5678/webhook/lendloop/overdue-sweep",
   LENDLOOP_APP_URL: "http://localhost:3000",
+  LENDLOOP_DATA_KEY: dataKeys.LENDLOOP_DATA_KEY,
+  // Only set during a key rotation (see convex/security.ts).
+  ...(dataKeys.LENDLOOP_DATA_KEY_PREVIOUS ? { LENDLOOP_DATA_KEY_PREVIOUS: dataKeys.LENDLOOP_DATA_KEY_PREVIOUS } : {}),
 };
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lendloop-"));
 const envFile = path.join(tmp, "convex.env");

@@ -7,6 +7,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { ActivityList, LoanStatusBadge } from "@/components/loan-bits";
 import { useToast } from "@/components/providers/ToastProvider";
 import { useViewer } from "@/components/providers/ViewerProvider";
+import { SecurityPanel } from "@/components/SecurityPanel";
 import { Badge, Button, Card, EmptyState, PageHeader, PageSpinner, SectionTitle } from "@/components/ui";
 import { formatRange, timeAgo } from "@/lib/format";
 import { useMutationState } from "@/lib/useMutationState";
@@ -167,19 +168,21 @@ export function AdminView() {
   const health = useQuery(api.automation.health, isAdmin ? {} : "skip");
   const loans = useQuery(api.loans.all, isAdmin ? {} : "skip");
   const users = useQuery(api.users.list, isAdmin ? {} : "skip");
+  const security = useQuery(api.security.status, isAdmin ? {} : "skip");
 
   if (!isAdmin) {
     return <EmptyState title="Admins only">This page is for LendLoop admins.</EmptyState>;
   }
-  if (!health || !loans || !users) return <PageSpinner label="Loading admin data" />;
+  if (!health || !loans || !users || !security) return <PageSpinner label="Loading admin data" />;
 
   return (
     <>
       <PageHeader
         title="Admin"
-        description="Automation health, every loan, and Trusted Lender badges. To remove a listing, use Browse."
+        description="Automation health, data protection, every loan, and Trusted Lender badges. To remove a listing, use Browse."
       />
       <AutomationHealth health={health} />
+      <SecurityPanel status={security} />
 
       <SectionTitle count={loans.length}>All loans</SectionTitle>
       {loans.length === 0 ? (
